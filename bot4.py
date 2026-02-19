@@ -32,8 +32,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # 세부 전략 설정 (생존 필수 조건 반영)
 # ---------------------------------------------------------------------
 TICKERS = ["KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP", "KRW-DOGE"]
-SURVIVOR_GOAL = 0.007      # 하락/횡보장 최소 목표 (+0.7%)
-BULL_GOAL = 0.015         # 상승장 최소 목표 (+1.5%)
+SURVIVOR_GOAL = 0.01       # 하락/횡보장 최소 목표 (+1.0%)
+BULL_GOAL = 0.025          # 상승장 최소 목표 (+2.5%)
 STRICT_SL = -0.037        # 개별 종목 절대 손절선 (사용자 설정 기준)
 
 def send_telegram(message):
