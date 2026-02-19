@@ -1,0 +1,23 @@
+# Sensitive Info
+.env
+
+# Logs
+*.log
+*.log.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+.project
+.pydevproject
+.settings/
+
+# Misc
+.DS_Store
