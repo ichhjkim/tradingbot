@@ -157,10 +157,15 @@ def run_bot():
                 target_achieved = False
                 daily_profits_done = set() # 일일 종목별 익절 기록 초기화
                 last_reset_date = now.date()
-                m_state = get_market_state()
+                send_telegram(f"📅 새 날 시작\n- 자산 기준: {base_asset:,.0f}원")
+
+            # [실시간 시장 상태 갱신] 6시간 추세 실시간 반영
+            new_m_state = get_market_state()
+            if new_m_state != m_state:
+                m_state = new_m_state
                 current_target = BULL_GOAL if m_state == "BULL" else SURVIVOR_GOAL
                 current_indiv_tp = BULL_GOAL if m_state == "BULL" else SURVIVOR_GOAL
-                send_telegram(f"📅 새 날 시작\n- 목표치: {current_target*100:.1f}% ({m_state}장)\n- 자산 기준: {base_asset:,.0f}원")
+                send_telegram(f"📉 시장 추세 변화 감지: {m_state} 모드로 전환\n- 새로운 목표 수익률: {current_target*100:.1f}%")
 
             current_wealth = get_total_wealth(upbit)
             profit_rate = (current_wealth / base_asset) - 1 if base_asset > 0 else 0
