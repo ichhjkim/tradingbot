@@ -45,14 +45,26 @@ def send_telegram(message):
     except:
         pass
 
-def get_market_state():
-    """상승장인지 하락/횡보장인지 판단 (BTC 기준, 최근 6시간 추세 실시간 반영)"""
+def get_market_state(current_state):
+    """상승장인지 하락/횡보장인지 판단 (BTC 기준, 0.2% 버퍼를 두어 잦은 변경 방지)"""
     try:
-        # 1시간봉 기준 최근 6시간 평균선보다 위에 있는지 확인 (안정성과 반응성의 절충안)
+        # 1시간봉 기준 최근 6시간 평균선 확인
         df = pyupbit.get_ohlcv("KRW-BTC", interval="minute60", count=6)
         ma6 = df['close'].rolling(window=6).mean().iloc[-1]
         curr_p = pyupbit.get_current_price("KRW-BTC")
-        return "BULL" if curr_p > ma6 else "BEAR"
+        
+        BUFFER = 0.002 # 0.2% 여유폭
+        
+        if current_state == "BULL":
+            # 상승장일 때는 평균보다 0.2% 이상 떨어져야 하락장으로 판단
+            if curr_p < ma6 * (1 - BUFFER):
+                return "BEAR"
+            return "BULL"
+        else:
+            # 하락/횡보장일 때는 평균보다 0.2% 이상 올라와야 상승장으로 판단
+            if curr_p > ma6 * (1 + BUFFER):
+                return "BULL"
+            return "BEAR"
     except:
         return "BEAR"
 
@@ -99,7 +111,7 @@ def run_bot():
     FEE = 0.0011               # 업비트 수수료 (매수/매도 합산 + 여유치)
     
     # 가동 시 시장 모드 판단
-    m_state = get_market_state()
+    m_state = get_market_state("BEAR")
     current_target = BULL_GOAL if m_state == "BULL" else SURVIVOR_GOAL
     current_indiv_tp = BULL_GOAL if m_state == "BULL" else SURVIVOR_GOAL # 개별 익절가도 시장에 맞춤
 
@@ -159,8 +171,8 @@ def run_bot():
                 last_reset_date = now.date()
                 send_telegram(f"📅 새 날 시작\n- 자산 기준: {base_asset:,.0f}원")
 
-            # [실시간 시장 상태 갱신] 6시간 추세 실시간 반영
-            new_m_state = get_market_state()
+            # [실시간 시장 상태 갱신] 6시간 추세 실시간 반영 (버퍼 적용)
+            new_m_state = get_market_state(m_state)
             if new_m_state != m_state:
                 m_state = new_m_state
                 current_target = BULL_GOAL if m_state == "BULL" else SURVIVOR_GOAL
