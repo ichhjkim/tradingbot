@@ -46,12 +46,13 @@ def send_telegram(message):
         pass
 
 def get_market_state():
-    """상승장인지 하락/횡보장인지 판단 (BTC 기준)"""
+    """상승장인지 하락/횡보장인지 판단 (BTC 기준, 최근 6시간 추세 실시간 반영)"""
     try:
-        df = pyupbit.get_ohlcv("KRW-BTC", interval="day", count=5)
-        ma5 = df['close'].rolling(window=5).mean().iloc[-1]
+        # 1시간봉 기준 최근 6시간 평균선보다 위에 있는지 확인 (안정성과 반응성의 절충안)
+        df = pyupbit.get_ohlcv("KRW-BTC", interval="minute60", count=6)
+        ma6 = df['close'].rolling(window=6).mean().iloc[-1]
         curr_p = pyupbit.get_current_price("KRW-BTC")
-        return "BULL" if curr_p > ma5 else "BEAR"
+        return "BULL" if curr_p > ma6 else "BEAR"
     except:
         return "BEAR"
 
