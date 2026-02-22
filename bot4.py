@@ -32,9 +32,9 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # 세부 전략 설정 (생존 필수 조건 반영)
 # ---------------------------------------------------------------------
 TICKERS = ["KRW-ETH", "KRW-SOL", "KRW-DOGE"]
-SURVIVOR_GOAL = 0.01       # 하락/횡보장 최소 목표 (+1.0%)
+SURVIVOR_GOAL = 0.012       # 하락/횡보장 최소 목표 (+1.2%)
 BULL_GOAL = 0.025          # 상승장 최소 목표 (+2.5%)
-STRICT_SL = -0.037        # 개별 종목 절대 손절선 (사용자 설정 기준)
+STRICT_SL = -0.05          # 개별 종목 절대 손절선 (-5%)
 
 def send_telegram(message):
     logging.info(f"[Telegram] {message}")
@@ -104,6 +104,20 @@ def run_bot():
 
     send_telegram(f"🔥 생존 프로토콜 V4.2 가동\n- 현재 시장: {m_state} 모드\n- 목표 수익률: {current_target*100:.1f}%\n- 종목별 손절선: {STRICT_SL*100}%")
 
+    # 가동 시 잔고 정보 로드 (상태 출항용)
+    balances = upbit.get_balances() 
+    initial_coin_bals = {f"KRW-{b['currency']}": float(b['balance']) + float(b['locked']) for b in balances if b['currency'] != "KRW"}
+    initial_avg_buy_prices = {f"KRW-{b['currency']}": float(b['avg_buy_price']) for b in balances if b['currency'] != "KRW"}
+
+    # 가동 시 이미 보유 중인 코인이 있다면 기준가 출력
+    for t, amt in initial_coin_bals.items():
+        if t in TICKERS and amt > 1e-8:
+            avg_p = initial_avg_buy_prices.get(t, 0)
+            if avg_p > 0:
+                target_p = avg_p * (1 + current_indiv_tp + FEE)
+                stop_p = avg_p * (1 + STRICT_SL + FEE)
+                send_telegram(f"🔍 [보유 확인] {t}\n- 평단가: {avg_p:,}원\n- 익절가: {target_p:,.0f}원 (+{current_indiv_tp*100:.1f}%)\n- 손절가: {stop_p:,.0f}원 ({STRICT_SL*100:.1f}%)")
+
     while True:
         try:
             now = datetime.datetime.now()
@@ -112,10 +126,31 @@ def run_bot():
             coin_bals = {f"KRW-{b['currency']}": float(b['balance']) + float(b['locked']) for b in balances if b['currency'] != "KRW"}
             avg_buy_prices = {f"KRW-{b['currency']}": float(b['avg_buy_price']) for b in balances if b['currency'] != "KRW"}
             
-            # 9시 리셋
+            # 9시 리셋 및 생존 판정
             if now.hour == 9 and now.minute == 0 and now.second < 10 and last_reset_date != now.date():
+                current_wealth = get_total_wealth(upbit)
+                final_profit_rate = (current_wealth / base_asset) - 1 if base_asset > 0 else 0
+                
+                # [생존 판독] 하루 1.2% 수익 못 내면 시스템 종료 경고
+                if final_profit_rate < 0.012:
+                    send_telegram(f"⚠️ [생존 실패] 일일 수익률 {final_profit_rate*100:.2f}%로 목표(1.2%) 미달.\n약속대로 시스템을 종료(삭제) 대기 모드로 전환합니다. 💀")
+                
                 for t, amt in coin_bals.items():
-                    if t in TICKERS: upbit.sell_market_order(t, amt)
+                    if t in TICKERS:
+                        avg_p = avg_buy_prices.get(t, 0)
+                        if avg_p > 0:
+                            curr_p = pyupbit.get_current_price(t)
+                            p_rate = (curr_p / avg_p) - 1 - FEE
+                            if p_rate >= 0 or p_rate <= STRICT_SL:
+                                upbit.sell_market_order(t, amt)
+                                send_telegram(f"🌅 9시 장정리 매도: {t}\n수익률: {p_rate*100:.2f}%")
+                            else:
+                                target_p = avg_p * (1 + current_indiv_tp + FEE)
+                                stop_p = avg_p * (1 + STRICT_SL + FEE)
+                                send_telegram(f"🌅 9시 전략적 보유: {t}\n- 현재 수익률: {p_rate*100:.2f}%\n- 다음 목표가: {target_p:,.0f}원\n- 다음 손절가: {stop_p:,.0f}원")
+                        else:
+                            upbit.sell_market_order(t, amt)
+
                 time.sleep(5)
                 base_asset = get_total_wealth(upbit)
                 target_achieved = False
@@ -124,7 +159,7 @@ def run_bot():
                 m_state = get_market_state()
                 current_target = BULL_GOAL if m_state == "BULL" else SURVIVOR_GOAL
                 current_indiv_tp = BULL_GOAL if m_state == "BULL" else SURVIVOR_GOAL
-                send_telegram(f"📅 리셋 완료\n- 목표치 재설정: {current_target*100:.1f}% ({m_state}장)")
+                send_telegram(f"📅 새 날 시작\n- 목표치: {current_target*100:.1f}% ({m_state}장)\n- 자산 기준: {base_asset:,.0f}원")
 
             current_wealth = get_total_wealth(upbit)
             profit_rate = (current_wealth / base_asset) - 1 if base_asset > 0 else 0
@@ -138,7 +173,6 @@ def run_bot():
 
             if not target_achieved:
                 krw_bal = upbit.get_balance("KRW")
-                # coin_bals는 위에서 이미 갱신됨
                 
                 for ticker in TICKERS:
                     curr_p = pyupbit.get_current_price(ticker)
@@ -150,8 +184,14 @@ def run_bot():
                         if rsi is not None and (rsi <= 30 or curr_p <= l_band):
                             if krw_bal > 5000:
                                 upbit.buy_market_order(ticker, krw_bal * 0.2)
-                                send_telegram(f"🎣 [{ticker}] 타점 포착\n가격: {curr_p:,}원 / RSI: {rsi:.1f}")
-                                time.sleep(1) # 체결 대기 넉넉히
+                                time.sleep(1) # 체결 대기
+                                # 새로 산 코인의 평단가 확인
+                                new_bal = upbit.get_balances()
+                                avg_p = next((float(b['avg_buy_price']) for b in new_bal if f"KRW-{b['currency']}" == ticker), 0)
+                                if avg_p > 0:
+                                    target_p = avg_p * (1 + current_indiv_tp + FEE)
+                                    stop_p = avg_p * (1 + STRICT_SL + FEE)
+                                    send_telegram(f"🎣 [{ticker}] 매수 완료\n- 매수가: {avg_p:,}원 (RSI:{rsi:.1f})\n- 익절 목표: {target_p:,.0f}원\n- 손절 기준: {stop_p:,.0f}원")
                                 krw_bal = upbit.get_balance("KRW")
                     
                     # 매도: 실시간 업비트 평단가 기반 익절/손절
